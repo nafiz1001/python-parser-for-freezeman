@@ -1,6 +1,5 @@
-from _ast import AST, Assign, Call, FunctionDef, Name, Subscript, Attribute
 import ast
-from typing import Any, Callable
+from typing import Any, Callable, Generic, TypeVar
 
 with open("sample.py") as f:
     source = f.read()
@@ -8,42 +7,49 @@ source_lines = source.splitlines()
 
 tree = ast.parse(source)
 
-class MyNodeVisitor(ast.NodeVisitor):
+T_AST = TypeVar('T_AST', ast.Call, ast.Assign, ast.Subscript)
+
+class MyNodeVisitor(ast.NodeVisitor, Generic[T_AST]):
     def __init__(self) -> None:
-        self.matches: list[Subscript] = []
+        self.matches: list[T_AST] = []
     
-    def visit(self, node):
+    def visit(self, node) -> list[T_AST]:
         super().visit(node)
         return self.matches
 
-class SelfWarningsVisitor(MyNodeVisitor):    
-    def visit_Subscript(self, node: Subscript) -> Any:
-        if isinstance(node.value, Attribute):
+class SelfWarningsVisitor(MyNodeVisitor[ast.Subscript]):    
+    def visit_Subscript(self, node: ast.Subscript) -> Any:
+        if isinstance(node.value, ast.Attribute):
             attribute = node.value
-            if isinstance(attribute.value, Name):
-                name = attribute.value
-                if name.id == 'self' and attribute.attr == 'warnings':
+            if isinstance(attribute.value, ast.Name):
+                if attribute.value.id == 'self' and attribute.attr == 'warnings':
                     self.matches.append(node)
 
-class AppendSelfWarningsVisitor(MyNodeVisitor):
-    def visit_Call(self, node: Call) -> Any:
-        if isinstance(node.func, Attribute):
+class AppendSelfWarningsVisitor(MyNodeVisitor[ast.Call]):
+    def visit_Call(self, node: ast.Call) -> Any:
+        if isinstance(node.func, ast.Attribute):
             attribute = node.func
-            if attribute.attr == 'append' and SelfWarningsVisitor().visit(node):
+            if attribute.attr == 'append' and SelfWarningsVisitor().visit(attribute.value):
                 self.matches.append(node)
 
-class AssignSelfWarningsVisitor(MyNodeVisitor):
-    def visit_Assign(self, node: Assign) -> Any:
+class AssignSelfWarningsVisitor(MyNodeVisitor[ast.Assign]):
+    def visit_Assign(self, node: ast.Assign) -> Any:
         if SelfWarningsVisitor().visit(node.targets[0]):
             self.matches.append(node)
 
-class ExtendSelfWarningsVisitor(MyNodeVisitor):
-    def visit_Call(self, node: Call) -> Any:
-        if isinstance(node.func, Attribute):
+class ExtendSelfWarningsVisitor(MyNodeVisitor[ast.Call]):
+    def visit_Call(self, node: ast.Call) -> Any:
+        if isinstance(node.func, ast.Attribute):
             attribute = node.func
-            if attribute.attr == 'extend' and SelfWarningsVisitor().visit(node):
+            if attribute.attr == 'extend' and SelfWarningsVisitor().visit(attribute.value):
                 self.matches.append(node)
 
+def to_dict_with_lineno(nodes: list[T_AST]) -> dict[int, T_AST]:
+    result = {}
+    for node in nodes:
+        result[node.lineno] = node
+    return result
 
-for node in AssignSelfWarningsVisitor().visit(tree) + AppendSelfWarningsVisitor().visit(tree) + ExtendSelfWarningsVisitor().visit(tree):
-    print(source_lines[node.lineno-1][node.col_offset:])
+appends = to_dict_with_lineno(AppendSelfWarningsVisitor().visit(tree))
+assigns = to_dict_with_lineno(AssignSelfWarningsVisitor().visit(tree))
+extends = to_dict_with_lineno(ExtendSelfWarningsVisitor().visit(tree))
