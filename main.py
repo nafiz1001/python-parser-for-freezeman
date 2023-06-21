@@ -1,54 +1,49 @@
-import re
-from os import path
-from tree_sitter import Language, Parser, Node
+from _ast import AST, Assign, Call, FunctionDef, Name, Subscript, Attribute
+import ast
+from typing import Any, Callable
 
-LIB_PATH = path.join("build", "languages.so")
-Language.build_library(
-    LIB_PATH,
-    [
-        path.join("..", "tree-sitter-python"),
-    ],
-)
-PYTHON = Language(LIB_PATH, "python")
+with open("sample.py") as f:
+    source = f.read()
+source_lines = source.splitlines()
 
-parser = Parser()
-parser.set_language(PYTHON)
+tree = ast.parse(source)
+
+class MyNodeVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.matches: list[Subscript] = []
+    
+    def visit(self, node):
+        super().visit(node)
+        return self.matches
+
+class SelfWarningsVisitor(MyNodeVisitor):    
+    def visit_Subscript(self, node: Subscript) -> Any:
+        if isinstance(node.value, Attribute):
+            attribute = node.value
+            if isinstance(attribute.value, Name):
+                name = attribute.value
+                if name.id == 'self' and attribute.attr == 'warnings':
+                    self.matches.append(node)
+
+class AppendSelfWarningsVisitor(MyNodeVisitor):
+    def visit_Call(self, node: Call) -> Any:
+        if isinstance(node.func, Attribute):
+            attribute = node.func
+            if attribute.attr == 'append' and SelfWarningsVisitor().visit(node):
+                self.matches.append(node)
+
+class AssignSelfWarningsVisitor(MyNodeVisitor):
+    def visit_Assign(self, node: Assign) -> Any:
+        if SelfWarningsVisitor().visit(node.targets[0]):
+            self.matches.append(node)
+
+class ExtendSelfWarningsVisitor(MyNodeVisitor):
+    def visit_Call(self, node: Call) -> Any:
+        if isinstance(node.func, Attribute):
+            attribute = node.func
+            if attribute.attr == 'extend' and SelfWarningsVisitor().visit(node):
+                self.matches.append(node)
 
 
-def is_self_warnings(node: Node):
-    if node.type == "subscript":
-        if node.children[0].type == "attribute" and node.children[0].children[0].text == b'self':
-            attribute_node = node.children[0].children[2]
-            if attribute_node.type == "identifier" and attribute_node.text == b"warnings":
-                return True
-    return False
-
-def is_pattern_list(node: Node):
-    return node.type == "pattern_list"
-
-def is_expression_statement(node: Node):
-    return node.type == "expression_statement"
-
-def is_assignment_expression(node: Node):
-    return node.type == "assignment"
-
-def is_append_expression(node: Node):
-    return (
-        node.type == 'call' and
-        node.children[0].type == 'attribute' and
-        node.children[0].children[2].type == "identifier" and
-        node.children[0].children[2].text == b'append'
-    )
-
-def is_extend_expression(node: Node):
-    return (
-        node.type == 'call' and
-        node.children[0].type == 'attribute' and
-        node.children[0].children[2].type == "identifier" and
-        node.children[0].children[2].text == b'extend'
-    )
-
-with open("sample.py", "rb") as f:
-    tree = parser.parse(f.read())
-
-print(tree.root_node.sexp())
+for node in AssignSelfWarningsVisitor().visit(tree) + AppendSelfWarningsVisitor().visit(tree) + ExtendSelfWarningsVisitor().visit(tree):
+    print(source_lines[node.lineno-1][node.col_offset:])
