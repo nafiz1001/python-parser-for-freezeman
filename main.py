@@ -1,5 +1,6 @@
 import ast
 from typing import Any, Callable, Generic, TypeVar
+import itertools
 
 with open("sample.py") as f:
     source = f.read()
@@ -56,13 +57,38 @@ extends = to_dict_with_lineno(ExtendSelfWarningsVisitor().visit(tree))
 
 new_source_lines = []
 
-lineno_iter = range(len(source_lines))
+source_lines_iter = enumerate(source_lines)
 
-for lineno in lineno_iter:
-    source_line = source_lines[lineno]
+def handle_joinedstr(js: ast.JoinedStr) -> tuple[str, list[ast.FormattedValue]]:
+    format_args: list[ast.FormattedValue] = []
+    for v in js.values:
+        if isinstance(v, ast.FormattedValue):
+            format_args.append(v)
+
+    formatted_string = ast.get_source_segment(source, value)
+    for i, format_arg in enumerate(format_args):
+        formatted_string = formatted_string.replace('{' + ast.get_source_segment(source, format_arg.value) + '}', '{'f'{i}''}')
+    
+    return formatted_string, format_args
+
+
+for source_line_index, source_line in source_lines_iter:
+    lineno = source_line_index + 1
+
+    def skip_node(node: ast.AST, append=True):
+        global source_line
+
+        if append:
+            new_source_lines.append(source_line)
+        skipcount = node.end_lineno - node.lineno
+        for _ in range(skipcount):
+            _, source_line = next(source_lines_iter)
+            if append:
+                new_source_lines.append(source_line)
+
     if lineno in appends:
         append = appends[lineno]
-    if lineno in assigns:
+    elif lineno in assigns:
         #     Assign(
         # targets=[
         #     Subscript(
@@ -114,20 +140,35 @@ for lineno in lineno_iter:
         assign = assigns[lineno]
         target = assign.targets[0]
         if isinstance(target, ast.Tuple):
+            # assigning to multiple variables
             pass
         elif isinstance(target, ast.Subscript):
+            # assigning to self.warnings[somekey]
             value = assign.value
             if isinstance(value, ast.List):
                 if not value.elts:
                     # handle empty list value
-                    print(source_line)
+                    skip_node(assign)
                 else:
-                    value_content = value.elts[0]
-                    if isinstance(value_content, ast.Constant):
-                        # handle string literal
-                        tuple_node = ast.Tuple(elts=[ast.Constant(value_content)], ctx=ast.Load())
-                        
-    if lineno in extends:
+                    # assume only one value present in list literal
+                    value_obj = value.elts[0]
+                    if isinstance(value_obj, ast.Constant):
+                        new_source_lines.append(f'{source_line[0:target.end_col_offset]} = ({ast.get_source_segment(source, value_obj)},)')
+                    if isinstance(value_obj, ast.JoinedStr):
+                        pass
+            elif isinstance(value, ast.JoinedStr):
+                formatted_string, format_args = handle_joinedstr(value)
+
+                splitted_formatted_string = formatted_string.splitlines()
+                new_source_lines.append(f'{source_line[0:target.end_col_offset]} = ({splitted_formatted_string[0]}')
+                for s in splitted_formatted_string[1:]:
+                    new_source_lines.append(s)
+                    next(source_lines_iter)
+                new_source_lines[-1] += (f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}])')
+    elif lineno in extends:
         extend = extends[lineno]
     else:
         pass
+        # new_source_lines.append(source_line)
+    
+print("\n".join(new_source_lines))
