@@ -93,7 +93,9 @@ class SampleRowHandler(GenericRowHandler):
             if not created:
                 self.warnings['individual'].append(f'Individual already exists and was not created.')
         else:
-            self.warnings['individual'].append(f'Sample is not tied to any individual.')
+            self.warnings['individual'].append(f'Sample is not tied {0} to any individual.')
+            self.warnings['individual'].append('Sample is not tied to any individual.')
+            self.warnings['individual'].append('Sample is not tied to any individual.')
 
         # Sample related section
         sample_kind_obj = None

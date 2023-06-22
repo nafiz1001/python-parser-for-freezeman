@@ -65,7 +65,7 @@ def handle_joinedstr(js: ast.JoinedStr) -> tuple[str, list[ast.FormattedValue]]:
         if isinstance(v, ast.FormattedValue):
             format_args.append(v)
 
-    formatted_string = ast.get_source_segment(source, value_obj)
+    formatted_string = ast.get_source_segment(source, js)
     for i, format_arg in enumerate(format_args):
         formatted_string = formatted_string.replace('{' + ast.get_source_segment(source, format_arg.value) + '}', '{'f'{i}''}')
     
@@ -88,6 +88,25 @@ for source_line_index, source_line in source_lines_iter:
 
     if lineno in appends:
         append = appends[lineno]
+        func = ast.get_source_segment(source, append.func)
+        arg = append.args[0]
+        if isinstance(arg, ast.JoinedStr):
+            formatted_string, format_args = handle_joinedstr(arg)
+            formatted_string = formatted_string.splitlines()
+            new_source_lines.append(f'{" " * append.col_offset}{func}(({formatted_string[0]}')
+            for s in formatted_string[1:]:
+                new_source_lines.append(s)
+                next(source_lines_iter)
+            new_source_lines[-1] += f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}]))'
+        if isinstance(arg, ast.Constant):
+            func = ast.get_source_segment(source, append.func)
+            arg = append.args[0]
+            lines = f'{" " * append.col_offset}{func}(({ast.get_source_segment(source, arg)}, [])'.splitlines()
+            new_source_lines.append(lines[0])
+            for line in lines[1:]:
+                new_source_lines.append(line)
+                next(source_lines_iter)
+            new_source_lines[-1] += ", []))"
     elif lineno in assigns:
         #     Assign(
         # targets=[
@@ -140,8 +159,10 @@ for source_line_index, source_line in source_lines_iter:
         assign = assigns[lineno]
         target = assign.targets[0]
         if isinstance(target, ast.Tuple):
-            # assigning to multiple variables
-            pass
+            self_warning = SelfWarningsVisitor().visit(target)[0]
+            self_warning_text = ast.get_source_segment(source, self_warning)
+            new_source_lines.append(source_line)
+            new_source_lines.append(f'{" " * target.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
         elif isinstance(target, ast.Subscript):
             # assigning to self.warnings[somekey]
             value_obj = assign.value
@@ -181,11 +202,10 @@ for source_line_index, source_line in source_lines_iter:
                 for s in splitted_formatted_string[1:]:
                     new_source_lines.append(s)
                     next(source_lines_iter)
-                new_source_lines[-1] += (f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}])')
+                new_source_lines[-1] += f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}])'
     elif lineno in extends:
         extend = extends[lineno]
     else:
-        pass
-        # new_source_lines.append(source_line)
+        new_source_lines.append(source_line)
     
 print("\n".join(new_source_lines))
