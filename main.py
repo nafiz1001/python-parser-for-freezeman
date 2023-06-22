@@ -65,7 +65,7 @@ def handle_joinedstr(js: ast.JoinedStr) -> tuple[str, list[ast.FormattedValue]]:
         if isinstance(v, ast.FormattedValue):
             format_args.append(v)
 
-    formatted_string = ast.get_source_segment(source, value)
+    formatted_string = ast.get_source_segment(source, value_obj)
     for i, format_arg in enumerate(format_args):
         formatted_string = formatted_string.replace('{' + ast.get_source_segment(source, format_arg.value) + '}', '{'f'{i}''}')
     
@@ -144,20 +144,37 @@ for source_line_index, source_line in source_lines_iter:
             pass
         elif isinstance(target, ast.Subscript):
             # assigning to self.warnings[somekey]
-            value = assign.value
-            if isinstance(value, ast.List):
-                if not value.elts:
+            value_obj = assign.value
+            if isinstance(value_obj, ast.List):
+                if not value_obj.elts:
                     # handle empty list value
                     skip_node(assign)
                 else:
                     # assume only one value present in list literal
-                    value_obj = value.elts[0]
+                    value_obj = value_obj.elts[0]
                     if isinstance(value_obj, ast.Constant):
-                        new_source_lines.append(f'{source_line[0:target.end_col_offset]} = ({ast.get_source_segment(source, value_obj)},)')
+                        splitted_formatted_string = f'{source_line[0:target.end_col_offset]} = [({ast.get_source_segment(source, value_obj)}, [])]'.splitlines()
+                        new_source_lines.append(splitted_formatted_string[0])
+                        for s in splitted_formatted_string[1:]:
+                            new_source_lines.append(s)
+                            next(source_lines_iter)
                     if isinstance(value_obj, ast.JoinedStr):
-                        pass
-            elif isinstance(value, ast.JoinedStr):
-                formatted_string, format_args = handle_joinedstr(value)
+                        formatted_string, format_args = handle_joinedstr(value_obj)
+
+                        splitted_formatted_string = formatted_string.splitlines()
+                        new_source_lines.append(f'{source_line[0:target.end_col_offset]} = [({splitted_formatted_string[0]}')
+                        for s in splitted_formatted_string[1:]:
+                            new_source_lines.append(s)
+                            next(source_lines_iter)
+                        new_source_lines[-1] += (f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}])]')
+            elif isinstance(value_obj, ast.Constant):
+                splitted_formatted_string = f'{source_line[0:target.end_col_offset]} = ({ast.get_source_segment(source, value_obj)}, [])'.splitlines()
+                new_source_lines.append(splitted_formatted_string[0])
+                for s in splitted_formatted_string[1:]:
+                    new_source_lines.append(s)
+                    next(source_lines_iter)
+            elif isinstance(value_obj, ast.JoinedStr):
+                formatted_string, format_args = handle_joinedstr(value_obj)
 
                 splitted_formatted_string = formatted_string.splitlines()
                 new_source_lines.append(f'{source_line[0:target.end_col_offset]} = ({splitted_formatted_string[0]}')

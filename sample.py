@@ -155,9 +155,14 @@ class SampleRowHandler(GenericRowHandler):
                 if Sample.objects.filter(name__exact=sample['name']).exists():
                     self.warnings['name'] = f'Sample with the same name [{sample["name"]}] already exists. ' \
                                             f'A new sample with the same name will be created.'
+                    self.warnings['babe'] = 'Sample with the same name already exists. ' \
+                                                'A new sample with the same name will be created.'
                 else:
-                    self.warnings['name'] = f'Sample with the same name [{sample["name"]}] but different type casing already exists. ' \
-                                            f'Please verify the name is correct.'
+                    self.warnings['rabe'] = [f'Sample with the same name [{sample["name"]}] but different type casing already exists. ' \
+                                            f'Please verify the name is correct.']
+                    self.warnings['mame'] = ['Sample with the same name [{sample["name"]}] but different type casing already exists. ' \
+                        'Please verify the name is correct.']
+
 
             # Container related section
             parent_container_obj = None
