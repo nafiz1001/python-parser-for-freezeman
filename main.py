@@ -1,6 +1,7 @@
 import ast
 from typing import Any, Callable, Generic, TypeVar
 import itertools
+import re
 
 with open("sample.py") as f:
     source = f.read()
@@ -65,7 +66,10 @@ def handle_joinedstr(js: ast.JoinedStr) -> tuple[str, list[ast.FormattedValue]]:
         if isinstance(v, ast.FormattedValue):
             format_args.append(v)
 
-    formatted_string = ast.get_source_segment(source, js)
+    formatted_string = ast.get_source_segment(source, js)[1:]
+    forextralines = re.findall(r'\n\s*', formatted_string)
+    if forextralines:
+        formatted_string = formatted_string.replace(forextralines[0] + 'f', forextralines[0])
     for i, format_arg in enumerate(format_args):
         formatted_string = formatted_string.replace('{' + ast.get_source_segment(source, format_arg.value) + '}', '{'f'{i}''}')
     
@@ -87,10 +91,12 @@ for source_line_index, source_line in source_lines_iter:
                 new_source_lines.append(source_line)
 
     if lineno in appends:
+        # Append
         append = appends[lineno]
         func = ast.get_source_segment(source, append.func)
         arg = append.args[0]
         if isinstance(arg, ast.JoinedStr):
+            # append f-string
             formatted_string, format_args = handle_joinedstr(arg)
             formatted_string = formatted_string.splitlines()
             new_source_lines.append(f'{" " * append.col_offset}{func}(({formatted_string[0]}')
@@ -99,87 +105,43 @@ for source_line_index, source_line in source_lines_iter:
                 next(source_lines_iter)
             new_source_lines[-1] += f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}]))'
         if isinstance(arg, ast.Constant):
+            # append string
             func = ast.get_source_segment(source, append.func)
             arg = append.args[0]
-            lines = f'{" " * append.col_offset}{func}(({ast.get_source_segment(source, arg)}, [])'.splitlines()
+            lines = f'{" " * append.col_offset}{func}(({ast.get_source_segment(source, arg)}, []))'.splitlines()
             new_source_lines.append(lines[0])
             for line in lines[1:]:
                 new_source_lines.append(line)
                 next(source_lines_iter)
-            new_source_lines[-1] += ", []))"
     elif lineno in assigns:
-        #     Assign(
-        # targets=[
-        #     Subscript(
-        #         value=Attribute(
-        #             value=Name(id='self', ctx=Load()),
-        #             attr='warnings',
-        #             ctx=Load()),
-        #         slice=Constant(value='individual'),
-        #         ctx=Store())],
-        # value=List(elts=[], ctx=Load())),
-        #     Assign(
-        # targets=[
-        #     Subscript(
-        #         value=Attribute(
-        #             value=Name(id='self', ctx=Load()),
-        #             attr='warnings',
-        #             ctx=Load()),
-        #         slice=Constant(value='name'),
-        #         ctx=Store())],
-        # value=JoinedStr(
-        #     values=[
-        #         Constant(value='Sample with the same name ['),
-        #         FormattedValue(
-        #             value=Subscript(
-        #                 value=Name(id='sample', ctx=Load()),
-        #                 slice=Constant(value='name'),
-        #                 ctx=Load()),
-        #             conversion=-1),
-        #         Constant(value='] already exists. A new sample with the same name will be created.')]))],
-        # Assign(
-        #     targets=[
-        #         Tuple(
-        #             elts=[
-        #                 Name(id='reference_genome_obj', ctx=Store()),
-        #                 Subscript(
-        #                     value=Attribute(
-        #                         value=Name(id='self', ctx=Load()),
-        #                         attr='errors',
-        #                         ctx=Load()),
-        #                     slice=Constant(value='reference_genome'),
-        #                     ctx=Store()),
-        #                 Subscript(
-        #                     value=Attribute(
-        #                         value=Name(id='self', ctx=Load()),
-        #                         attr='warnings',
-        #                         ctx=Load()),
-        #                     slice=Constant(value='reference_genome'),
-        #                     ctx=Store())
+        # Assignment
         assign = assigns[lineno]
         target = assign.targets[0]
         if isinstance(target, ast.Tuple):
+            # assigning to tuples
+            skip_node(assign)
             self_warning = SelfWarningsVisitor().visit(target)[0]
             self_warning_text = ast.get_source_segment(source, self_warning)
-            new_source_lines.append(source_line)
-            new_source_lines.append(f'{" " * target.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
+            new_source_lines.append(f'{" " * assign.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
         elif isinstance(target, ast.Subscript):
             # assigning to self.warnings[somekey]
             value_obj = assign.value
             if isinstance(value_obj, ast.List):
                 if not value_obj.elts:
-                    # handle empty list value
+                    # list empty
                     skip_node(assign)
                 else:
                     # assume only one value present in list literal
                     value_obj = value_obj.elts[0]
                     if isinstance(value_obj, ast.Constant):
+                        # list contains string
                         splitted_formatted_string = f'{source_line[0:target.end_col_offset]} = [({ast.get_source_segment(source, value_obj)}, [])]'.splitlines()
                         new_source_lines.append(splitted_formatted_string[0])
                         for s in splitted_formatted_string[1:]:
                             new_source_lines.append(s)
                             next(source_lines_iter)
                     if isinstance(value_obj, ast.JoinedStr):
+                        # list contains f-string
                         formatted_string, format_args = handle_joinedstr(value_obj)
 
                         splitted_formatted_string = formatted_string.splitlines()
@@ -189,12 +151,14 @@ for source_line_index, source_line in source_lines_iter:
                             next(source_lines_iter)
                         new_source_lines[-1] += (f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}])]')
             elif isinstance(value_obj, ast.Constant):
+                # assigning with string
                 splitted_formatted_string = f'{source_line[0:target.end_col_offset]} = ({ast.get_source_segment(source, value_obj)}, [])'.splitlines()
                 new_source_lines.append(splitted_formatted_string[0])
                 for s in splitted_formatted_string[1:]:
                     new_source_lines.append(s)
                     next(source_lines_iter)
             elif isinstance(value_obj, ast.JoinedStr):
+                # assigning with f-string
                 formatted_string, format_args = handle_joinedstr(value_obj)
 
                 splitted_formatted_string = formatted_string.splitlines()
@@ -203,8 +167,19 @@ for source_line_index, source_line in source_lines_iter:
                     new_source_lines.append(s)
                     next(source_lines_iter)
                 new_source_lines[-1] += f', [{", ".join([ast.get_source_segment(source, f.value) for f in format_args])}])'
+            else:
+                # any other assigned value
+                skip_node(assign)
+                self_warning = SelfWarningsVisitor().visit(target)[0]
+                self_warning_text = ast.get_source_segment(source, self_warning)
+                new_source_lines.append(f'{" " * assign.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
     elif lineno in extends:
+        # Extending
         extend = extends[lineno]
+        skip_node(extend)
+        self_warning = SelfWarningsVisitor().visit(extend.func)[0]
+        self_warning_text = ast.get_source_segment(source, self_warning)
+        new_source_lines.append(f'{" " * assign.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
     else:
         new_source_lines.append(source_line)
     
