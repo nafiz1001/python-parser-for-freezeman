@@ -2,8 +2,9 @@ import ast
 from typing import Any, Callable, Generic, TypeVar
 import itertools
 import re
+import sys
 
-with open("sample.py") as f:
+with open(sys.argv[1]) as f:
     source = f.read()
 source_lines = source.splitlines()
 
@@ -179,8 +180,10 @@ for source_line_index, source_line in source_lines_iter:
         skip_node(extend)
         self_warning = SelfWarningsVisitor().visit(extend.func)[0]
         self_warning_text = ast.get_source_segment(source, self_warning)
-        new_source_lines.append(f'{" " * assign.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
+        new_source_lines.append(f'{" " * extend.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
     else:
         new_source_lines.append(source_line)
     
-print("\n".join(new_source_lines))
+# print("\n".join(new_source_lines))
+with open(sys.argv[1], 'w') as f:
+    f.write("\n".join(new_source_lines))
