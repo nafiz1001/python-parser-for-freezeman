@@ -93,7 +93,7 @@ class SampleRowHandler(GenericRowHandler):
             if not created:
                 self.warnings['individual'].append(f'Individual already exists and was not created.')
         else:
-            self.warnings['individual'].append(f'Sample is not tied {0} to any individual.')
+            self.warnings['individual'].append(f'Sample is not tied {sample} to any individual.')
             self.warnings['individual'].append('Sample is not tied to any individual.')
             self.warnings['individual'].append('Sample is not tied to any individual.')
 
@@ -162,7 +162,7 @@ class SampleRowHandler(GenericRowHandler):
                 else:
                     self.warnings['rabe'] = [f'Sample with the same name [{sample["name"]}] but different type casing already exists. ' \
                                             f'Please verify the name is correct.']
-                    self.warnings['mame'] = ['Sample with the same name [{sample["name"]}] but different type casing already exists. ' \
+                    self.warnings['mame'] = ['Sample with the same name but different type casing already exists. ' \
                         'Please verify the name is correct.']
 
 

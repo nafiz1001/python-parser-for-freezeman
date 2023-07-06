@@ -40,13 +40,6 @@ class AssignSelfWarningsVisitor(MyNodeVisitor[ast.Assign]):
         if SelfWarningsVisitor().visit(node.targets[0]):
             self.matches.append(node)
 
-class ExtendSelfWarningsVisitor(MyNodeVisitor[ast.Call]):
-    def visit_Call(self, node: ast.Call) -> Any:
-        if isinstance(node.func, ast.Attribute):
-            attribute = node.func
-            if attribute.attr == 'extend' and SelfWarningsVisitor().visit(attribute.value):
-                self.matches.append(node)
-
 def to_dict_with_lineno(nodes: list[T_AST]) -> dict[int, T_AST]:
     result = {}
     for node in nodes:
@@ -55,7 +48,6 @@ def to_dict_with_lineno(nodes: list[T_AST]) -> dict[int, T_AST]:
 
 appends = to_dict_with_lineno(AppendSelfWarningsVisitor().visit(tree))
 assigns = to_dict_with_lineno(AssignSelfWarningsVisitor().visit(tree))
-extends = to_dict_with_lineno(ExtendSelfWarningsVisitor().visit(tree))
 
 new_source_lines = []
 
@@ -118,13 +110,7 @@ for source_line_index, source_line in source_lines_iter:
         # Assignment
         assign = assigns[lineno]
         target = assign.targets[0]
-        if isinstance(target, ast.Tuple):
-            # assigning to tuples
-            skip_node(assign)
-            self_warning = SelfWarningsVisitor().visit(target)[0]
-            self_warning_text = ast.get_source_segment(source, self_warning)
-            new_source_lines.append(f'{" " * assign.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
-        elif isinstance(target, ast.Subscript):
+        if isinstance(target, ast.Subscript):
             # assigning to self.warnings[somekey]
             value_obj = assign.value
             if isinstance(value_obj, ast.List):
@@ -171,16 +157,8 @@ for source_line_index, source_line in source_lines_iter:
             else:
                 # any other assigned value
                 skip_node(assign)
-                self_warning = SelfWarningsVisitor().visit(target)[0]
-                self_warning_text = ast.get_source_segment(source, self_warning)
-                new_source_lines.append(f'{" " * assign.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
-    elif lineno in extends:
-        # Extending
-        extend = extends[lineno]
-        skip_node(extend)
-        self_warning = SelfWarningsVisitor().visit(extend.func)[0]
-        self_warning_text = ast.get_source_segment(source, self_warning)
-        new_source_lines.append(f'{" " * extend.col_offset}{self_warning_text} = [(x, []) for x in {self_warning_text}]')
+        else:
+            skip_node(assign)
     else:
         new_source_lines.append(source_line)
     
